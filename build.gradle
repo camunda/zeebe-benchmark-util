@@ -69,7 +69,7 @@ bootBuildImage {
 	}
 	
 	if(getTag())
-		imageName = "${System.getenv("GHCR_REGISTRY")}/${project.name}:${project.version}"
+		imageName = "${System.getenv("GHCR_REGISTRY")}/camunda/${project.name}:${project.version}"
 }
 
 private String getTag() {

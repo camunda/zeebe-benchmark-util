@@ -7,6 +7,7 @@ import io.camunda.client.api.command.CreateProcessInstanceCommandStep1;
 import io.camunda.client.api.command.DeployResourceCommandStep1;
 import io.camunda.client.api.response.BrokerInfo;
 import io.camunda.client.api.response.Topology;
+import io.camunda.zeebebenchmark.ZeebeBenchmarkUtilApplication;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.vavr.control.Try;
@@ -18,11 +19,13 @@ import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -40,6 +43,8 @@ class InstanceStarter {
 	private final AtomicLong successInstances = new AtomicLong();
 	private final AtomicLong failedInstances = new AtomicLong();
 	private final AtomicLong inFlightInstances = new AtomicLong();
+	
+	private record Stats(long success, long failed, long inFlight) {}
 
 	@PostConstruct
 	public void init() {
@@ -85,39 +90,53 @@ class InstanceStarter {
 				.of(in -> objectMapper.readValue(in, new TypeReference<Map<String, Object>>() {}))
 				.get();
 
-		Disposable subscribe = Flux.interval(interval)
+		Sinks.Many<Mono<?>> inFlightSink = Sinks.many().unicast().onBackpressureBuffer();
+
+		Disposable startProcessInstancesSubscription = Flux.interval(interval)
 				.onBackpressureDrop()
-				.flatMap(_ -> startSingleInstance(variables))
+				.doOnNext(_ -> inFlightSink.tryEmitNext(startSingleInstance(variables)))
+				.subscribe();
+
+		inFlightSink.asFlux()
+				.flatMap(it -> it)
+				.subscribe();
+
+		Flux.interval(Duration.ofSeconds(5))
+				.map(_ -> new Stats(successInstances.get(),
+						failedInstances.get(),
+						inFlightInstances.get()))
+				.doOnNext(stats -> log.atInfo().arg(stats).log("{}"))
+				.buffer(3)
+				.handle((statsList, sink) -> {
+					if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() != 0)
+						return;
+					if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() == 0)
+						sink.complete();
+					else if (statsList.size() == 3 && Set.copyOf(statsList).size() == 1)
+						sink.error(new IllegalStateException("Zeebe has stalled"));
+				})
+				.doOnError(_ -> startProcessInstancesSubscription.dispose())
+				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
 				.subscribe();
 		
-		if(starterProperties.durationLimit() != null)
+		if (starterProperties.durationLimit() != null)
 			Mono.delay(starterProperties.durationLimit())
 					.doOnNext(_ -> log.atInfo().log("Duration limit reached, stopping"))
-					.doOnNext(_ -> subscribe.dispose())
+					.doOnNext(_ -> startProcessInstancesSubscription.dispose())
 					.subscribe();
-		
-		Flux.interval(Duration.ofSeconds(5))
-				.doOnNext(_ -> log.atInfo()
-						.arg(successInstances.get())
-						.arg(failedInstances.get())
-						.arg(inFlightInstances.get())
-						.log("Success: {}, Failed: {}, In-flight: {}"))
-				.subscribe();
 	}
 
 	private Mono<?> startSingleInstance(Map<String, Object> variables) {
 		return doStartSingleInstance(variables)
-				
 				.doOnSubscribe(_ -> inFlightInstances.incrementAndGet())
 				
 				.doOnError(_ -> failedInstances.incrementAndGet())
-
+				
 				.onErrorComplete(thrown -> thrown instanceof StatusRuntimeException srex
 						&& srex.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED)
-				
-				.doOnError(thrown -> log.atError().setCause(thrown).log("Error creating new process instance"))
-				
-				.doOnSuccess(_ -> successInstances.incrementAndGet())
+
+				.doOnNext(_ -> successInstances.incrementAndGet())
+				.onErrorComplete()
 				.doFinally(_ -> inFlightInstances.decrementAndGet());
 	}
 

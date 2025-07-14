@@ -1,0 +1,91 @@
+import java.nio.file.Files
+
+plugins {
+	id 'java'
+	id 'groovy'
+	alias(libs.plugins.spring.boot)
+	alias(libs.plugins.spring.dependencyManagement)
+}
+
+if(getTag()) version = getTag()
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(24)
+	}
+}
+
+springBoot {
+	mainClass = "io.camunda.zeebebenchmark.ZeebeBenchmarkUtilApplication"
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+	maven {
+		url 'https://gitlab.com/api/v4/projects/50731191/packages/maven'
+	}
+}
+
+dependencies {
+	implementation libs.spring.boot.starter.webflux
+	implementation libs.spring.boot.starter.actuator
+
+	implementation libs.vavr
+	implementation libs.slf4j.api
+
+	implementation libs.camundaStarter
+
+	compileOnly libs.lombok
+	annotationProcessor libs.lombok
+	
+	runtimeOnly libs.micrometer.prometheus
+	runtimeOnly libs.micrometer.prometheus.simpleclient
+
+	testImplementation libs.reactor.test
+	testImplementation libs.spock.core
+	testImplementation libs.groovy.json
+
+	testRuntimeOnly libs.junit.platformLauncher
+	testRuntimeOnly libs.byteBuddy
+	testRuntimeOnly libs.objenesis
+}
+
+tasks.withType(Test).configureEach {
+	useJUnitPlatform()
+}
+tasks.register("deletePlainJar") {
+	doLast {
+		java.nio.file.Path libsDir = project.layout.buildDirectory.asFile.get().toPath().resolve("libs/")
+		println libsDir.toAbsolutePath()
+		Files.walk(libsDir)
+				.filter(Files::isRegularFile)
+				.filter(p -> p.toString().contains("plain"))
+				.findFirst()
+				.ifPresentOrElse(Files::delete, { throw new RuntimeException("No plain jar") })
+	}
+}
+
+bootBuildImage {
+	publish = getTag() as boolean
+	
+	docker {
+		publishRegistry {
+			username = System.getenv("GHCR_USERNAME")
+			password = System.getenv("GHCR_PASSWORD")
+		}
+	}
+	
+	if(getTag())
+		imageName = "${System.getenv("GHCR_REGISTRY")}/${project.name}:${project.version}"
+}
+
+private String getTag() {
+	if( ! System.getenv("GITHUB_REF_TYPE")?.equals("tag")) return null
+	return System.getenv("GITHUB_REF_NAME")
+}

@@ -1,5 +1,3 @@
-import java.nio.file.Files
-
 plugins {
 	id 'java'
 	id 'groovy'
@@ -58,17 +56,6 @@ dependencies {
 
 tasks.withType(Test).configureEach {
 	useJUnitPlatform()
-}
-tasks.register("deletePlainJar") {
-	doLast {
-		java.nio.file.Path libsDir = project.layout.buildDirectory.asFile.get().toPath().resolve("libs/")
-		println libsDir.toAbsolutePath()
-		Files.walk(libsDir)
-				.filter(Files::isRegularFile)
-				.filter(p -> p.toString().contains("plain"))
-				.findFirst()
-				.ifPresentOrElse(Files::delete, { throw new RuntimeException("No plain jar") })
-	}
 }
 
 bootBuildImage {

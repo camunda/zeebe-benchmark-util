@@ -1,0 +1,62 @@
+name: Build
+
+on:
+  push: {}
+  pull_request: {}
+  
+  
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: "eclipse-temurin:24-jdk"
+    permissions:
+      contents: read
+      packages: write
+      checks: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with: 
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+        with:
+          add-job-summary: 'on-failure'
+
+      - name: Build
+        run: |
+          ./gradlew build
+          
+  image:
+    needs: 
+      - build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+        with:
+          add-job-summary: 'on-failure'
+
+      - name: Build and Publish Image
+        env: 
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_REGISTRY: ${{ env.REGISTRY }}
+        run: |
+          ./gradlew bootBuildImage

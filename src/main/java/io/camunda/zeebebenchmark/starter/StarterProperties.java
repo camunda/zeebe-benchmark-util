@@ -17,5 +17,8 @@ record StarterProperties(
 		Duration withResultsTimeout, 
 		Duration durationLimit, 
 		String msgName, 
-		boolean startViaMessage) {
+		boolean startViaMessage, 
+		boolean ignoreResourceExhausted, 
+		boolean failFast, 
+		boolean stallDetection) {
 }

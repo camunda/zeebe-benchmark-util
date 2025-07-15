@@ -20,10 +20,12 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
+import reactor.core.publisher.SynchronousSink;
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -107,14 +109,8 @@ class InstanceStarter {
 						inFlightInstances.get()))
 				.doOnNext(stats -> log.atInfo().arg(stats).log("{}"))
 				.buffer(3)
-				.handle((statsList, sink) -> {
-					if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() != 0)
-						return;
-					if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() == 0)
-						sink.complete();
-					else if (statsList.size() == 3 && Set.copyOf(statsList).size() == 1)
-						sink.error(new IllegalStateException("Zeebe has stalled"));
-				})
+				.handle((statsList, sink) -> 
+						detectStall(statsList, sink, startProcessInstancesSubscription))
 				.doOnError(_ -> startProcessInstancesSubscription.dispose())
 				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
 				.subscribe();
@@ -125,7 +121,7 @@ class InstanceStarter {
 					.doOnNext(_ -> startProcessInstancesSubscription.dispose())
 					.subscribe();
 	}
-
+	
 	private Mono<?> startSingleInstance(Map<String, Object> variables) {
 		return doStartSingleInstance(variables)
 				.doOnSubscribe(_ -> inFlightInstances.incrementAndGet())
@@ -136,7 +132,11 @@ class InstanceStarter {
 						&& srex.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED)
 
 				.doOnNext(_ -> successInstances.incrementAndGet())
-				.onErrorComplete()
+				
+				.transform(m -> ! starterProperties.failFast() 
+						? m.onErrorComplete() 
+						: m.onErrorResume(thrown -> Mono.error(new RuntimeException("Failed to create process instance", thrown))))
+				
 				.doFinally(_ -> inFlightInstances.decrementAndGet());
 	}
 
@@ -168,5 +168,18 @@ class InstanceStarter {
 							.send());
 		
 		return Mono.fromCompletionStage(commandBuilder.send());
+	}
+
+	private void detectStall(List<Stats> statsList, SynchronousSink<Object> sink, Disposable startProcessInstancesSubscription) {
+		if ( ! starterProperties.stallDetection())
+			return;
+		
+		if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() != 0)
+			return;
+		
+		if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() == 0)
+			sink.complete();
+		else if (statsList.size() == 3 && Set.copyOf(statsList).size() == 1)
+			sink.error(new IllegalStateException("Zeebe has stalled"));
 	}
 }

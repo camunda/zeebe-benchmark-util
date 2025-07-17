@@ -1,25 +1,20 @@
 package io.camunda.zeebebenchmark.starter;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.command.CreateProcessInstanceCommandStep1;
 import io.camunda.client.api.command.DeployResourceCommandStep1;
-import io.camunda.client.api.response.BrokerInfo;
-import io.camunda.client.api.response.Topology;
+import io.camunda.zeebebenchmark.AbstractBenchmarkingRole;
 import io.camunda.zeebebenchmark.ZeebeBenchmarkUtilApplication;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import io.vavr.control.Try;
-import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.Sinks;
 import reactor.core.publisher.SynchronousSink;
 import reactor.util.retry.Retry;
 
@@ -32,14 +27,9 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
-class InstanceStarter {
-	
-	private final StarterProperties starterProperties;
-	private final CamundaClient camundaClient;
-	private final ResourceLoader resourceLoader;
-	private final ObjectMapper objectMapper;
+@Profile("starter")
+class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 	
 	private final AtomicLong businessKeyCounter = new AtomicLong();
 	private final AtomicLong successInstances = new AtomicLong();
@@ -48,9 +38,16 @@ class InstanceStarter {
 	
 	private record Stats(long success, long failed, long inFlight) {}
 
-	@PostConstruct
-	public void init() {
-		printTopology();
+	public InstanceStarter(
+			CamundaClient camundaClient,
+			StarterProperties starterProperties,
+			ResourceLoader resourceLoader,
+			ObjectMapper objectMapper) {
+		super(camundaClient, starterProperties, resourceLoader, objectMapper);
+	}
+
+	@Override
+	protected void doInit() {
 		deployProcess();
 		startInstances();
 	}
@@ -59,9 +56,9 @@ class InstanceStarter {
 
 		DeployResourceCommandStep1.DeployResourceCommandStep2 deployCommand = camundaClient
 				.newDeployResourceCommand()
-				.addResourceFromClasspath(starterProperties.bpmnXmlPath());
+				.addResourceFromClasspath(properties.bpmnXmlPath());
 
-		starterProperties.extraBpmnModels().forEach(deployCommand::addResourceFromClasspath);
+		properties.extraBpmnModels().forEach(deployCommand::addResourceFromClasspath);
 
 		Mono.fromCompletionStage(deployCommand.send())
 				.retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(1))
@@ -71,36 +68,14 @@ class InstanceStarter {
 				.block();
 	}
 
-	private void printTopology() {
-		Mono.fromCompletionStage(camundaClient.newTopologyRequest().send())
-				.flatMapIterable(Topology::getBrokers)
-				.doOnNext(broker -> log.atInfo()
-						.arg(broker.getNodeId())
-						.arg(broker.getAddress())
-						.log("Broker {} - {}"))
-				.flatMapIterable(BrokerInfo::getPartitions)
-				.doOnNext(p -> log.atInfo().arg(p.getPartitionId()).arg(p.getRole()).log("{} - {}"))
-				.then()
-				.doOnError(thrown -> log.atError().setCause(thrown).log("Topology request failed"))
-				.block();
-	}
 
 	private void startInstances() {
-		Duration interval = Duration.ofSeconds(1).dividedBy(starterProperties.rate());
+		Duration interval = Duration.ofSeconds(1).dividedBy(properties.rate());
 		log.atInfo().arg(interval.toNanos()).log("Creating an instance every {}ns");
-		Map<String, Object> variables = Try.withResources(() -> resourceLoader.getResource(starterProperties.payloadPath()).getInputStream())
-				.of(in -> objectMapper.readValue(in, new TypeReference<Map<String, Object>>() {}))
-				.get();
-
-		Sinks.Many<Mono<?>> inFlightSink = Sinks.many().unicast().onBackpressureBuffer();
 
 		Disposable startProcessInstancesSubscription = Flux.interval(interval)
 				.onBackpressureDrop()
-				.doOnNext(_ -> inFlightSink.tryEmitNext(startSingleInstance(variables)))
-				.subscribe();
-
-		inFlightSink.asFlux()
-				.flatMap(it -> it)
+				.doOnNext(_ -> pushInFlight(startSingleInstance(getVariables())))
 				.subscribe();
 
 		Flux.interval(Duration.ofSeconds(5))
@@ -115,8 +90,8 @@ class InstanceStarter {
 				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
 				.subscribe();
 		
-		if (starterProperties.durationLimit() != null)
-			Mono.delay(starterProperties.durationLimit())
+		if (properties.durationLimit() != null)
+			Mono.delay(properties.durationLimit())
 					.doOnNext(_ -> log.atInfo().log("Duration limit reached, stopping"))
 					.doOnNext(_ -> startProcessInstancesSubscription.dispose())
 					.subscribe();
@@ -133,7 +108,7 @@ class InstanceStarter {
 
 				.doOnNext(_ -> successInstances.incrementAndGet())
 				
-				.transform(m -> ! starterProperties.failFast() 
+				.transform(m -> ! properties.failFast() 
 						? m.onErrorComplete() 
 						: m.onErrorResume(thrown -> Mono.error(new RuntimeException("Failed to create process instance", thrown))))
 				
@@ -143,12 +118,12 @@ class InstanceStarter {
 	private Mono<?> doStartSingleInstance(Map<String, Object> variables) {
 		
 		Map<String, Object> instanceVariables = new HashMap<>(variables);
-		variables.put(starterProperties.businessKey(), businessKeyCounter.incrementAndGet());
+		variables.put(properties.businessKey(), businessKeyCounter.incrementAndGet());
 		
-		if(starterProperties.startViaMessage())
+		if(properties.startViaMessage())
 			return Mono.fromCompletionStage(camundaClient
 					.newPublishMessageCommand()
-					.messageName(starterProperties.msgName())
+					.messageName(properties.msgName())
 					.correlationKey(UUID.randomUUID().toString())
 					.variables(instanceVariables)
 					.timeToLive(Duration.ZERO)
@@ -156,22 +131,22 @@ class InstanceStarter {
 		
 		CreateProcessInstanceCommandStep1.CreateProcessInstanceCommandStep3 commandBuilder = camundaClient
 				.newCreateInstanceCommand()
-				.bpmnProcessId(starterProperties.processId())
+				.bpmnProcessId(properties.processId())
 				.latestVersion()
 				.variables(instanceVariables);
 		
 		
-		if(starterProperties.withResults())
+		if(properties.withResults())
 			return Mono.fromCompletionStage(commandBuilder
 							.withResult()
-							.requestTimeout(starterProperties.withResultsTimeout())
+							.requestTimeout(properties.withResultsTimeout())
 							.send());
 		
 		return Mono.fromCompletionStage(commandBuilder.send());
 	}
 
 	private void detectStall(List<Stats> statsList, SynchronousSink<Object> sink, Disposable startProcessInstancesSubscription) {
-		if ( ! starterProperties.stallDetection())
+		if ( ! properties.stallDetection())
 			return;
 		
 		if (startProcessInstancesSubscription.isDisposed() && statsList.getLast().inFlight() != 0)

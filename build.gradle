@@ -33,6 +33,7 @@ repositories {
 dependencies {
 	implementation libs.spring.boot.starter.webflux
 	implementation libs.spring.boot.starter.actuator
+	implementation libs.micrometer.prometheus
 
 	implementation libs.vavr
 	implementation libs.slf4j.api

@@ -1,5 +1,6 @@
 package io.camunda.zeebebenchmark.starter;
 
+import io.camunda.zeebebenchmark.GeneralProperties;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.Duration;
@@ -20,5 +21,5 @@ record StarterProperties(
 		boolean startViaMessage, 
 		boolean ignoreResourceExhausted, 
 		boolean failFast, 
-		boolean stallDetection) {
+		boolean stallDetection) implements GeneralProperties {
 }

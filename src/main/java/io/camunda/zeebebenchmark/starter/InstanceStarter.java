@@ -68,7 +68,6 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 				.block();
 	}
 
-
 	private void startInstances() {
 		Duration interval = Duration.ofSeconds(1).dividedBy(properties.rate());
 		log.atInfo().arg(interval.toNanos()).log("Creating an instance every {}ns");
@@ -78,23 +77,13 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 				.doOnNext(_ -> pushInFlight(startSingleInstance(getVariables())))
 				.subscribe();
 
-		Flux.interval(Duration.ofSeconds(5))
-				.map(_ -> new Stats(successInstances.get(),
-						failedInstances.get(),
-						inFlightInstances.get()))
-				.doOnNext(stats -> log.atInfo().arg(stats).log("{}"))
-				.buffer(3)
-				.handle((statsList, sink) -> 
-						detectStall(statsList, sink, startProcessInstancesSubscription))
-				.doOnError(_ -> startProcessInstancesSubscription.dispose())
-				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
-				.subscribe();
-		
 		if (properties.durationLimit() != null)
 			Mono.delay(properties.durationLimit())
 					.doOnNext(_ -> log.atInfo().log("Duration limit reached, stopping"))
 					.doOnNext(_ -> startProcessInstancesSubscription.dispose())
 					.subscribe();
+
+		startStats(startProcessInstancesSubscription);
 	}
 	
 	private Mono<?> startSingleInstance(Map<String, Object> variables) {
@@ -156,5 +145,20 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 			sink.complete();
 		else if (statsList.size() == 3 && Set.copyOf(statsList).size() == 1)
 			sink.error(new IllegalStateException("Zeebe has stalled"));
+	}
+	
+	private void startStats(Disposable startProcessInstancesSubscription) {
+		Flux.interval(Duration.ofSeconds(5))
+				.map(_ -> new Stats(successInstances.get(),
+						failedInstances.get(),
+						inFlightInstances.get()))
+				.doOnNext(stats -> log.atInfo().arg(stats).log("{}"))
+				.buffer(3)
+				.handle((statsList, sink) ->
+						detectStall(statsList, sink, startProcessInstancesSubscription))
+				.doOnError(_ -> startProcessInstancesSubscription.dispose())
+				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
+				.subscribe();
+
 	}
 }

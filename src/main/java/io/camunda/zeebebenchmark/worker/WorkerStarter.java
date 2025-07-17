@@ -14,11 +14,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Timed;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @Slf4j
@@ -26,6 +28,12 @@ import java.util.Map;
 class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 	
 	private final PrometheusMeterRegistry meterRegistry;
+
+	private final AtomicLong jobsReceived = new AtomicLong();
+	private final AtomicLong successfulCompletions = new AtomicLong();
+	private final AtomicLong failedCompletions = new AtomicLong();
+
+	private record Stats(long jobsReceived, long successfulCompletions, long failedCompletions) { }
 
 	WorkerStarter(
 			CamundaClient camundaClient,
@@ -41,6 +49,7 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 	protected void doInit() {
 		camundaClient.getConfiguration().getInterceptors().add(new MetricCollectingClientInterceptor(meterRegistry));
 		startWorkers();
+		startStats();
 	}
 
 	private void startWorkers() {
@@ -62,10 +71,11 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 				.metrics(metrics)
 				.open();
 	}
-	
+
 	private JobHandler handleJob(Map<String, Object> variables) {
 		return (client, job) -> {
 			shouldSendCompleteCommand(job)
+					.doOnSubscribe(_ -> jobsReceived.incrementAndGet())
 					.timed()
 					.filter(Timed::get)
 					.flatMap(timed -> Mono.delay(properties.completionDelay().minus(timed.elapsedSinceSubscription()))
@@ -73,7 +83,12 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 											.newCompleteCommand(job)
 											.variables(variables)
 											.send())
-									.doOnNext(this::pushInFlight)))
+									.doOnNext(completionStage -> pushInFlight(
+											Mono.fromCompletionStage(completionStage)
+													.doOnSuccess(_ -> 
+															successfulCompletions.incrementAndGet())
+													.doOnError(_ -> 
+															failedCompletions.incrementAndGet())))))
 					.subscribe();
 		};
 	}
@@ -96,5 +111,14 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 						.arg(correlationKey)
 						.log("Exception on publishing a message with name {} and correlationKey {}"))
 				.onErrorReturn(false);
+	}
+
+	private void startStats() {
+		Flux.interval(Duration.ofSeconds(5))
+				.map(_ -> new Stats(jobsReceived.get(),
+						successfulCompletions.get(),
+						failedCompletions.get()))
+				.doOnNext(stats -> log.atInfo().arg(stats).log("{}"))
+				.subscribe();
 	}
 }

@@ -5,12 +5,10 @@ import io.camunda.client.CamundaClient;
 import io.camunda.client.api.command.CreateProcessInstanceCommandStep1;
 import io.camunda.client.api.command.DeployResourceCommandStep1;
 import io.camunda.zeebebenchmark.AbstractBenchmarkingRole;
-import io.camunda.zeebebenchmark.ZeebeBenchmarkUtilApplication;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -41,9 +39,8 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 	public InstanceStarter(
 			CamundaClient camundaClient,
 			StarterProperties starterProperties,
-			ResourceLoader resourceLoader,
 			ObjectMapper objectMapper) {
-		super(camundaClient, starterProperties, resourceLoader, objectMapper);
+		super(camundaClient, starterProperties, objectMapper);
 	}
 
 	@Override
@@ -157,8 +154,6 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 				.handle((statsList, sink) ->
 						detectStall(statsList, sink, startProcessInstancesSubscription))
 				.doOnError(_ -> startProcessInstancesSubscription.dispose())
-				.doFinally(_ -> ZeebeBenchmarkUtilApplication.allowShutdown())
 				.subscribe();
-
 	}
 }

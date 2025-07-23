@@ -12,7 +12,6 @@ import io.micrometer.core.instrument.binder.grpc.MetricCollectingClientIntercept
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -38,10 +37,9 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 	WorkerStarter(
 			CamundaClient camundaClient,
 			WorkerProperties workerProperties,
-			ResourceLoader resourceLoader,
 			ObjectMapper objectMapper, 
 			PrometheusMeterRegistry meterRegistry) {
-		super(camundaClient, workerProperties, resourceLoader, objectMapper);
+		super(camundaClient, workerProperties, objectMapper);
 		this.meterRegistry = meterRegistry;
 	}
 
@@ -73,24 +71,22 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 	}
 
 	private JobHandler handleJob(Map<String, Object> variables) {
-		return (client, job) -> {
-			shouldSendCompleteCommand(job)
-					.doOnSubscribe(_ -> jobsReceived.incrementAndGet())
-					.timed()
-					.filter(Timed::get)
-					.flatMap(timed -> Mono.delay(properties.completionDelay().minus(timed.elapsedSinceSubscription()))
-							.then(Mono.fromSupplier(() -> client
-											.newCompleteCommand(job)
-											.variables(variables)
-											.send())
-									.doOnNext(completionStage -> pushInFlight(
-											Mono.fromCompletionStage(completionStage)
-													.doOnSuccess(_ -> 
-															successfulCompletions.incrementAndGet())
-													.doOnError(_ -> 
-															failedCompletions.incrementAndGet())))))
-					.subscribe();
-		};
+		return (client, job) -> shouldSendCompleteCommand(job)
+				.doOnSubscribe(_ -> jobsReceived.incrementAndGet())
+				.timed()
+				.filter(Timed::get)
+				.flatMap(timed -> Mono.delay(properties.completionDelay().minus(timed.elapsedSinceSubscription()))
+						.then(Mono.fromSupplier(() -> client
+										.newCompleteCommand(job)
+										.variables(variables)
+										.send())
+								.doOnNext(completionStage -> pushInFlight(
+										Mono.fromCompletionStage(completionStage)
+												.doOnSuccess(_ -> 
+														successfulCompletions.incrementAndGet())
+												.doOnError(_ -> 
+														failedCompletions.incrementAndGet())))))
+				.subscribe();
 	}
 
 	private Mono<Boolean> shouldSendCompleteCommand(ActivatedJob job) {

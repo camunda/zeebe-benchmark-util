@@ -9,6 +9,7 @@ import io.vavr.control.Try;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.core.io.ResourceLoader;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -22,7 +23,7 @@ public abstract class AbstractBenchmarkingRole<T extends GeneralProperties> {
 
 	protected final CamundaClient camundaClient;
 	protected final T properties;
-	protected final ResourceLoader resourceLoader;
+	protected final ResourceLoader resourceLoader = new DefaultResourceLoader();
 	protected final ObjectMapper objectMapper;
 
 	private final Sinks.Many<Mono<?>> inFlightSink = Sinks.many().unicast().onBackpressureBuffer();

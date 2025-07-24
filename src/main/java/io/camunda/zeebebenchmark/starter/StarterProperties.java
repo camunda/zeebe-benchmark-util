@@ -21,5 +21,7 @@ record StarterProperties(
 		boolean startViaMessage, 
 		boolean ignoreResourceExhausted, 
 		boolean failFast, 
-		boolean stallDetection) implements GeneralProperties {
+		boolean stallDetection,
+		Duration rateTime, 
+		int rateIncrease) implements GeneralProperties {
 }

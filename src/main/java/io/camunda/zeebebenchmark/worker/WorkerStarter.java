@@ -26,8 +26,6 @@ import java.util.concurrent.atomic.AtomicLong;
 @Profile("worker")
 class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 	
-	private final PrometheusMeterRegistry meterRegistry;
-
 	private final AtomicLong jobsReceived = new AtomicLong();
 	private final AtomicLong successfulCompletions = new AtomicLong();
 	private final AtomicLong failedCompletions = new AtomicLong();
@@ -39,8 +37,7 @@ class WorkerStarter extends AbstractBenchmarkingRole<WorkerProperties> {
 			WorkerProperties workerProperties,
 			ObjectMapper objectMapper, 
 			PrometheusMeterRegistry meterRegistry) {
-		super(camundaClient, workerProperties, objectMapper);
-		this.meterRegistry = meterRegistry;
+		super(camundaClient, workerProperties, objectMapper, meterRegistry);
 	}
 
 	@Override

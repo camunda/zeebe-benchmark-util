@@ -7,8 +7,9 @@ import io.camunda.client.api.command.DeployResourceCommandStep1;
 import io.camunda.zeebebenchmark.AbstractBenchmarkingRole;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
@@ -26,21 +27,26 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 @Slf4j
-@Profile("starter")
-class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
+abstract class AbstractInstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 	
 	private final AtomicLong businessKeyCounter = new AtomicLong();
 	private final AtomicLong successInstances = new AtomicLong();
 	private final AtomicLong failedInstances = new AtomicLong();
 	private final AtomicLong inFlightInstances = new AtomicLong();
 	
+	protected final AtomicLong currentRate = new AtomicLong();
+	
 	private record Stats(long success, long failed, long inFlight) {}
 
-	public InstanceStarter(
+	public AbstractInstanceStarter(
 			CamundaClient camundaClient,
 			StarterProperties starterProperties,
-			ObjectMapper objectMapper) {
-		super(camundaClient, starterProperties, objectMapper);
+			ObjectMapper objectMapper, 
+			PrometheusMeterRegistry meterRegistry) {
+		super(camundaClient, starterProperties, objectMapper, meterRegistry);
+		
+		currentRate.set(starterProperties.rate());
+		Gauge.builder("zeebe_client_starter_rate", currentRate::get).register(meterRegistry);
 	}
 
 	@Override
@@ -66,24 +72,20 @@ class InstanceStarter extends AbstractBenchmarkingRole<StarterProperties> {
 	}
 
 	private void startInstances() {
-		Duration interval = Duration.ofSeconds(1).dividedBy(properties.rate());
-		log.atInfo().arg(interval.toNanos()).log("Creating an instance every {}ns");
-
-		Disposable startProcessInstancesSubscription = Flux.interval(interval)
-				.onBackpressureDrop()
-				.doOnNext(_ -> pushInFlight(startSingleInstance(getVariables())))
-				.subscribe();
-
+		Disposable startProcessInstancesSubscription = doStartInstances();
+		
 		if (properties.durationLimit() != null)
 			Mono.delay(properties.durationLimit())
 					.doOnNext(_ -> log.atInfo().log("Duration limit reached, stopping"))
 					.doOnNext(_ -> startProcessInstancesSubscription.dispose())
 					.subscribe();
 
-		startStats(startProcessInstancesSubscription);
+		startStats(startProcessInstancesSubscription);	
 	}
 	
-	private Mono<?> startSingleInstance(Map<String, Object> variables) {
+	protected abstract Disposable doStartInstances();
+	
+	protected Mono<?> startSingleInstance(Map<String, Object> variables) {
 		return doStartSingleInstance(variables)
 				.doOnSubscribe(_ -> inFlightInstances.incrementAndGet())
 				

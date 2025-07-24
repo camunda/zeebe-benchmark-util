@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.response.BrokerInfo;
 import io.camunda.client.api.response.Topology;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.vavr.control.Try;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public abstract class AbstractBenchmarkingRole<T extends GeneralProperties> {
 	protected final T properties;
 	protected final ResourceLoader resourceLoader = new DefaultResourceLoader();
 	protected final ObjectMapper objectMapper;
+	protected final MeterRegistry meterRegistry;
 
 	private final Sinks.Many<Mono<?>> inFlightSink = Sinks.many().unicast().onBackpressureBuffer();
 

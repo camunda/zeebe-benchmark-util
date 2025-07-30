@@ -30,7 +30,6 @@ class FixedInstanceStarter extends AbstractInstanceStarter {
 		log.atInfo().arg(interval.toNanos()).log("Creating an instance every {}ns");
 
 		return Flux.interval(interval)
-				.onBackpressureDrop()
 				.doOnNext(_ -> pushInFlight(startSingleInstance(getVariables())))
 				.subscribe();
 	}

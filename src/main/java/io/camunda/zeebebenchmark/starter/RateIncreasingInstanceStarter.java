@@ -31,9 +31,9 @@ class RateIncreasingInstanceStarter extends AbstractInstanceStarter {
 					return o;
 				})
 				.concatMap(multiplier -> {
-					long rate = properties.rate() + (properties.rateIncrease() * multiplier);
-					Duration interval = Duration.ofSeconds(1).dividedBy(rate);
-					log.atInfo().arg(interval.toNanos()).arg(rate).log("Creating an instance every {}ns for rate {}/sec");
+					double rate = properties.rate() + (properties.rateIncrease() * multiplier);
+					Duration interval = Duration.ofNanos((long) (1e9 / rate));
+					log.atInfo().arg(interval).arg(rate).log("Creating an instance every {} for rate {}/sec");
 					currentRate.set(rate);
 
 					return Flux.interval(interval)

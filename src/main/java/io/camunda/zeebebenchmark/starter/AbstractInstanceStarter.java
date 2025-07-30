@@ -15,7 +15,6 @@ import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.SynchronousSink;
-import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.HashMap;
@@ -64,9 +63,10 @@ abstract class AbstractInstanceStarter extends AbstractBenchmarkingRole<StarterP
 		properties.extraBpmnModels().forEach(deployCommand::addResourceFromClasspath);
 
 		Mono.fromCompletionStage(deployCommand.send())
-				.retryWhen(Retry.fixedDelay(3, Duration.ofSeconds(1))
-						.doBeforeRetry(_ -> log.atError().log("Failed to deploy process, will retry")))
-				.doOnError(thrown -> log.atError().setCause(thrown).log("Failed to deploy process"))
+				.doOnError(thrown -> log.atError()
+						.addArgument(thrown.getMessage())
+						.log("Failed to deploy process, will retry ({})"))
+				.retryWhen(RETRY_FOREVER)
 				.doOnSuccess(d -> log.atInfo().arg(d.getProcesses().size()).log("Deployed {} resources"))
 				.block();
 	}

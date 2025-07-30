@@ -26,8 +26,8 @@ class FixedInstanceStarter extends AbstractInstanceStarter {
 
 	@Override
 	protected Disposable doStartInstances() {
-		Duration interval = Duration.ofSeconds(1).dividedBy(properties.rate());
-		log.atInfo().arg(interval.toNanos()).log("Creating an instance every {}ns");
+		Duration interval = Duration.ofNanos((long) (1e9 / properties.rate()));
+		log.atInfo().arg(interval).log("Creating an instance every {}");
 
 		return Flux.interval(interval)
 				.doOnNext(_ -> pushInFlight(startSingleInstance(getVariables())))

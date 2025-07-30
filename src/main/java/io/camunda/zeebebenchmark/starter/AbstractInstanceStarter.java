@@ -1,6 +1,7 @@
 package io.camunda.zeebebenchmark.starter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.util.concurrent.AtomicDouble;
 import io.camunda.client.CamundaClient;
 import io.camunda.client.api.command.CreateProcessInstanceCommandStep1;
 import io.camunda.client.api.command.DeployResourceCommandStep1;
@@ -33,7 +34,7 @@ abstract class AbstractInstanceStarter extends AbstractBenchmarkingRole<StarterP
 	private final AtomicLong failedInstances = new AtomicLong();
 	private final AtomicLong inFlightInstances = new AtomicLong();
 	
-	protected final AtomicLong currentRate = new AtomicLong();
+	protected final AtomicDouble currentRate = new AtomicDouble();
 	
 	private record Stats(long success, long failed, long inFlight) {}
 

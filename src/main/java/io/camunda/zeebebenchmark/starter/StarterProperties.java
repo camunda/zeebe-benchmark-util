@@ -9,7 +9,7 @@ import java.util.List;
 @ConfigurationProperties("benchmark.starter")
 record StarterProperties(
 		String processId,
-		long rate,
+		double rate,
 		String bpmnXmlPath,
 		List<String> extraBpmnModels, 
 		String businessKey,
